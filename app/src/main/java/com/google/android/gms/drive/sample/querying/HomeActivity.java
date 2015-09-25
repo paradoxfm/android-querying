@@ -130,8 +130,8 @@ public class HomeActivity extends BaseDriveActivity implements
 
         // enable action bar for home button, so we can open
         // the left list view for navigation.
-        getActionBar().setDisplayHomeAsUpEnabled(true);
-        getActionBar().setHomeButtonEnabled(true);
+        getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+        getSupportActionBar().setHomeButtonEnabled(true);
         mMainDrawerLayout = (DrawerLayout) findViewById(R.id.drawerLayoutMain);
     }
 
