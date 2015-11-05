@@ -25,5 +25,5 @@ dependencies {
 
     // Use the Drive client library from Google Play Services. Details of the client
     // libs can be found at https://goo.gl/jKNdLm
-    compile 'com.google.android.gms:play-services-drive:8.1.0'
+    compile 'com.google.android.gms:play-services-drive:8.3.0'
 }
