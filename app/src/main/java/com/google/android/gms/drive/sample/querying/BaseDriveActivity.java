@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright 2013 Google Inc. All Rights Reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
@@ -14,110 +14,51 @@
 
 package com.google.android.gms.drive.sample.querying;
 
-import com.google.android.gms.common.ConnectionResult;
-import com.google.android.gms.common.GoogleApiAvailability;
-import com.google.android.gms.common.api.GoogleApiClient;
-import com.google.android.gms.drive.Drive;
-
-import android.accounts.Account;
-import android.accounts.AccountManager;
 import android.content.Intent;
-import android.content.IntentSender.SendIntentException;
-import android.os.Bundle;
+import android.support.annotation.NonNull;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
+import android.widget.Toast;
+
+import com.google.android.gms.auth.api.signin.GoogleSignIn;
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
+import com.google.android.gms.auth.api.signin.GoogleSignInClient;
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
+import com.google.android.gms.drive.Drive;
+import com.google.android.gms.drive.DriveClient;
+import com.google.android.gms.drive.DriveResourceClient;
+import com.google.android.gms.tasks.Continuation;
+import com.google.android.gms.tasks.OnFailureListener;
+import com.google.android.gms.tasks.OnSuccessListener;
+import com.google.android.gms.tasks.Task;
+import com.google.android.gms.tasks.TaskCompletionSource;
 
 /**
  * An abstract activity that handles authorization and connection to the Drive
  * services.
  */
-public abstract class BaseDriveActivity extends AppCompatActivity implements
-        GoogleApiClient.ConnectionCallbacks,
-        GoogleApiClient.OnConnectionFailedListener {
-
+public abstract class BaseDriveActivity extends AppCompatActivity {
     private static final String TAG = "BaseDriveActivity";
-
-    /**
-     * Extra for account name.
-     */
-    protected static final String EXTRA_ACCOUNT_NAME = "account_name";
 
     /**
      * Request code for auto Google Play Services error resolution.
      */
-    protected static final int REQUEST_CODE_RESOLUTION = 1;
+    protected static final int REQUEST_CODE_SIGN_IN = 0;
 
     /**
-     * Next available request code.
+     * Handles high-level drive functions like sync
      */
-    protected static final int NEXT_AVAILABLE_REQUEST_CODE = 2;
+    private DriveClient mDriveClient;
 
     /**
-     * Google API client.
+     * Handle access to Drive resources/files.
      */
-    protected GoogleApiClient mGoogleApiClient;
+    private DriveResourceClient mDriveResourceClient;
 
-    /**
-     * Selected account name to authorize the app for and authenticate the
-     * client with.
-     */
-    protected String mAccountName;
-
-    /**
-     * Called on activity creation. Handlers {@code EXTRA_ACCOUNT_NAME} for
-     * handle if there is one set. Otherwise, looks for the first Google account
-     * on the device and automatically picks it for client connections.
-     */
     @Override
-    protected void onCreate(Bundle b) {
-        super.onCreate(b);
-        if (b != null) {
-            mAccountName = b.getString(EXTRA_ACCOUNT_NAME);
-        }
-        if (mAccountName == null) {
-            mAccountName = getIntent().getStringExtra(EXTRA_ACCOUNT_NAME);
-        }
-
-        if (mAccountName == null) {
-            Account[] accounts = AccountManager.get(this).getAccountsByType("com.google");
-            if (accounts.length == 0) {
-                Log.d(TAG, "Must have a Google account installed");
-                return;
-            }
-            mAccountName = accounts[0].name;
-        }
-    }
-
-    /**
-     * Saves the activity state.
-     */
-    @Override
-    protected void onSaveInstanceState(Bundle outState) {
-        super.onSaveInstanceState(outState);
-        outState.putString(EXTRA_ACCOUNT_NAME, mAccountName);
-    }
-
-    /**
-     * Called when activity gets visible. A connection to Drive services need to
-     * be initiated as soon as the activity is visible. Registers
-     * {@code ConnectionCallbacks} and {@code OnConnectionFailedListener} on the
-     * activities itself.
-     */
-    @Override
-    protected void onResume() {
-        super.onResume();
-        if (mAccountName == null) {
-            return;
-        }
-        if (mGoogleApiClient == null) {
-            // TODO: Don't set account name explicitly and remove required
-            // permissions to query available accounts.
-            mGoogleApiClient = new GoogleApiClient.Builder(this)
-                    .addApi(Drive.API).addScope(Drive.SCOPE_FILE)
-                    .setAccountName(mAccountName).addConnectionCallbacks(this)
-                    .addOnConnectionFailedListener(this).build();
-        }
-        mGoogleApiClient.connect();
+    protected void onStart() {
+        super.onStart();
+        signIn();
     }
 
     /**
@@ -126,55 +67,71 @@ public abstract class BaseDriveActivity extends AppCompatActivity implements
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_CODE_RESOLUTION && resultCode == RESULT_OK) {
-            mGoogleApiClient.connect();
+        if (requestCode == REQUEST_CODE_SIGN_IN) {
+            if (resultCode != RESULT_OK) {
+                // Sign-in may fail or be cancelled by the user. For this sample, sign-in is
+                // required and is fatal. For apps where sign-in is optional, handle appropriately
+                Log.e(TAG, "Sign-in failed.");
+                finish();
+                return;
+            }
+
+            Task<GoogleSignInAccount> getAccountTask =
+                    GoogleSignInClient.getGoogleSignInAccountFromIntent(data);
+            if (getAccountTask.isSuccessful()) {
+                initializeDriveClient(getAccountTask.getResult());
+            } else {
+                Log.e(TAG, "Sign-in failed.");
+                finish();
+            }
         }
     }
 
     /**
-     * Called when activity gets invisible. Connection to Drive service needs to
-     * be disconnected as soon as an activity is invisible.
+     * Starts the sign-in process and initializes the Drive client.
      */
-    @Override
-    protected void onPause() {
-        if (mGoogleApiClient != null) {
-            mGoogleApiClient.disconnect();
+    protected void signIn() {
+        GoogleSignInOptions signInOptions =
+                new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                        .requestScopes(Drive.SCOPE_FILE)
+                        .requestScopes(Drive.SCOPE_APPFOLDER)
+                        .build();
+        GoogleSignInClient googleSignInClient = GoogleSignIn.getClient(this, signInOptions);
+        GoogleSignInAccount signInAccount = googleSignInClient.getLastSignedInAccount();
+        if (signInAccount != null) {
+            initializeDriveClient(signInAccount);
+        } else {
+            startActivityForResult(googleSignInClient.getSignInIntent(), REQUEST_CODE_SIGN_IN);
         }
-        super.onPause();
     }
 
     /**
-     * Called when {@code mGoogleApiClient} is connected.
+     * Continues the sign-in process, initializing the DriveResourceClient with the current
+     * user's account.
      */
-    @Override
-    public void onConnected(Bundle connectionHint) {
-        Log.i(TAG, "GoogleApiClient connected");
+    private void initializeDriveClient(GoogleSignInAccount signInAccount) {
+        mDriveClient = Drive.getDriveClient(getApplicationContext(), signInAccount);
+        mDriveResourceClient = Drive.getDriveResourceClient(getApplicationContext(), signInAccount);
+        onDriveClientReady();
     }
 
     /**
-     * Called when {@code mGoogleApiClient} is disconnected.
+     * Shows a toast message.
      */
-    @Override
-    public void onConnectionSuspended(int cause) {
-        Log.i(TAG, "GoogleApiClient connection suspended");
+    protected void showMessage(String message) {
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
     }
 
     /**
-     * Called when {@code mGoogleApiClient} is trying to connect but failed.
-     * Handle {@code result.getResolution()} if there is a resolution is
-     * available.
+     * Called after the user has signed in and the Drive client has been initialized.
      */
-    @Override
-    public void onConnectionFailed(ConnectionResult result) {
-        Log.i(TAG, "GoogleApiClient connection failed: " + result.toString());
-        if (!result.hasResolution()) {
-            GoogleApiAvailability.getInstance().getErrorDialog(this, result.getErrorCode(), 0).show();
-            return;
-        }
-        try {
-            result.startResolutionForResult(this, REQUEST_CODE_RESOLUTION);
-        } catch (SendIntentException e) {
-            Log.e(TAG, "Exception while starting resolution activity", e);
-        }
+    protected abstract void onDriveClientReady();
+
+    protected DriveClient getDriveClient() {
+        return mDriveClient;
+    }
+
+    protected DriveResourceClient getDriveResourceClient() {
+        return mDriveResourceClient;
     }
 }
