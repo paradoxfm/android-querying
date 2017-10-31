@@ -24,6 +24,7 @@ import com.google.android.gms.auth.api.signin.GoogleSignIn;
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
 import com.google.android.gms.auth.api.signin.GoogleSignInClient;
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
+import com.google.android.gms.common.api.Scope;
 import com.google.android.gms.drive.Drive;
 import com.google.android.gms.drive.DriveClient;
 import com.google.android.gms.drive.DriveResourceClient;
@@ -32,6 +33,9 @@ import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.android.gms.tasks.Task;
 import com.google.android.gms.tasks.TaskCompletionSource;
+
+import java.util.HashSet;
+import java.util.Set;
 
 /**
  * An abstract activity that handles authorization and connection to the Drive
@@ -77,7 +81,7 @@ public abstract class BaseDriveActivity extends AppCompatActivity {
             }
 
             Task<GoogleSignInAccount> getAccountTask =
-                    GoogleSignInClient.getGoogleSignInAccountFromIntent(data);
+                    GoogleSignIn.getSignedInAccountFromIntent(data);
             if (getAccountTask.isSuccessful()) {
                 initializeDriveClient(getAccountTask.getResult());
             } else {
@@ -91,16 +95,19 @@ public abstract class BaseDriveActivity extends AppCompatActivity {
      * Starts the sign-in process and initializes the Drive client.
      */
     protected void signIn() {
-        GoogleSignInOptions signInOptions =
-                new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-                        .requestScopes(Drive.SCOPE_FILE)
-                        .requestScopes(Drive.SCOPE_APPFOLDER)
-                        .build();
-        GoogleSignInClient googleSignInClient = GoogleSignIn.getClient(this, signInOptions);
-        GoogleSignInAccount signInAccount = googleSignInClient.getLastSignedInAccount();
-        if (signInAccount != null) {
+        Set<Scope> requiredScopes = new HashSet<>(2);
+        requiredScopes.add(Drive.SCOPE_FILE);
+        requiredScopes.add(Drive.SCOPE_APPFOLDER);
+        GoogleSignInAccount signInAccount = GoogleSignIn.getLastSignedInAccount(this);
+        if (signInAccount != null && signInAccount.getGrantedScopes().containsAll(requiredScopes)) {
             initializeDriveClient(signInAccount);
         } else {
+            GoogleSignInOptions signInOptions =
+                    new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                            .requestScopes(Drive.SCOPE_FILE)
+                            .requestScopes(Drive.SCOPE_APPFOLDER)
+                            .build();
+            GoogleSignInClient googleSignInClient = GoogleSignIn.getClient(this, signInOptions);
             startActivityForResult(googleSignInClient.getSignInIntent(), REQUEST_CODE_SIGN_IN);
         }
     }
